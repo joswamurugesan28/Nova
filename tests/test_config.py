@@ -21,7 +21,10 @@ class LoadSettingsTests(unittest.TestCase):
         settings = load_settings()
         self.assertEqual(settings.app_name, "NOVA")
         self.assertIn(settings.config_path.name, "nova.toml")
-        self.assertEqual(settings.models.brain, "stub")
+        # M1-B: the real llama-server brain is the configured default;
+        # "stub" remains available by editing config/nova.toml (no code change).
+        self.assertIn(settings.models.brain, ("stub", "llama-server"))
+        self.assertTrue(settings.models.llama_server.enabled in (True, False))
         self.assertIn(settings.logging.level, ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"))
 
     def test_explicit_path_loads_and_parses(self) -> None:

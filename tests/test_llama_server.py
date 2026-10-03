@@ -343,7 +343,14 @@ class BackendFactoryTests(unittest.TestCase):
 # --------------------------------------------------------------------------- #
 class LlamaServerConfigTests(unittest.TestCase):
     def test_defaults(self) -> None:
-        ls = load_settings().models.llama_server
+        """Built-in defaults apply when [models.llama_server] is absent."""
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = Path(tmp) / "empty.toml"
+            cfg.write_text("[app]\nname = 'NOVA'\n", encoding="utf-8")
+            ls = load_settings(cfg).models.llama_server
         self.assertFalse(ls.enabled)
         self.assertEqual(ls.base_url, "http://127.0.0.1:8080")
         self.assertEqual(ls.model, "qwen3-4b")
@@ -351,6 +358,12 @@ class LlamaServerConfigTests(unittest.TestCase):
         self.assertEqual(ls.context_size, 4096)
         self.assertEqual(ls.temperature, 0.7)
         self.assertEqual(ls.max_tokens, 512)
+
+    def test_shipped_config_enables_real_brain(self) -> None:
+        """M1-B: shipped config routes to llama-server but stays toggleable."""
+        settings = load_settings()
+        self.assertIn(settings.models.brain, ("llama-server", "stub"))
+        self.assertIsInstance(settings.models.llama_server.enabled, bool)
 
     def test_toml_section_parses(self) -> None:
         import tempfile
@@ -434,6 +447,38 @@ class ModelStatusCliTests(unittest.TestCase):
             self.assertEqual(code, 1)
             self.assertIn("brain backend: stub", out)
             self.assertIn("Status: NOT RUNNING", out)
+
+
+class ChatBackendFailureTests(unittest.TestCase):
+    """M1-B honesty rule: a dead real backend must NOT become fake output."""
+
+    def test_chat_reports_unavailable_backend_and_never_fakes(self) -> None:
+        import tempfile
+        from pathlib import Path
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = Path(tmp) / "c.toml"
+            cfg.write_text(
+                "[models]\nbrain = \"llama-server\"\n"
+                "[models.llama_server]\n"
+                "enabled = true\n"
+                f"base_url = \"{_dead_url()}\"\n"
+                "timeout_seconds = 2\n"
+                "health_timeout_seconds = 1\n",
+                encoding="utf-8",
+            )
+            buf = io.StringIO()
+            with mock.patch("builtins.input", side_effect=["hello", "/exit"]):
+                with redirect_stdout(buf):
+                    code = main(["--config", str(cfg), "chat"])
+            out = buf.getvalue()
+            self.assertEqual(code, 0)
+            self.assertIn("real backend unavailable", out)
+            self.assertIn("NOT fall back to the mock", out)
+            # no canned/mock text was presented as an answer
+            self.assertNotIn("nova(mock)>", out)
+            self.assertNotIn("[MOCK - no real model ran]", out)
 
 
 if __name__ == "__main__":

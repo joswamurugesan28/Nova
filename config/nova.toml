@@ -18,22 +18,25 @@ style = "helpful, concise, honest about limitations"
 system_prompt = "You are NOVA, a modular personal AI assistant. Be concise and honest about what you can and cannot do."
 
 [models]
-# Model assignments per task. "stub" is a mock backend used in M0/M1-A.
-# Backend names: "stub" (safe default) or "llama-server" (M1-A interface).
-# Real model ids (qwen3-4b, qwen3-vl-4b, whisper, indic-f5) are wired in later milestones.
-brain = "stub"
+# Model assignments per task. Backend names: "stub" (mock) or "llama-server".
+# M1-B: the real local brain is ONLINE. To switch back to mock mode without
+# any code change, set: brain = "stub" (and optionally enabled = false).
+brain = "llama-server"
 vision = "stub"
 stt = "stub"
 tts = "stub"
 artifact = "stub"
 
-# llama.cpp llama-server backend (M1-A: interface only).
-# IMPORTANT: no model has been downloaded and no server is installed yet.
-# To use this backend later: start llama-server manually with a Qwen3 4B
-# GGUF, set brain = "llama-server" AND enabled = true below.
-# NOVA never starts or stops llama-server on its own.
+# llama.cpp llama-server backend (M1-B: REAL inference online).
+# Runtime : ~/NOVA/tools/llama.cpp/llama-b11379/llama-server
+# Model   : ~/NOVA/models/qwen3/Qwen3-4B-Instruct-2507-Q4_K_M.gguf (Q4_K_M, 2.50 GB)
+# NOVA never starts or stops llama-server on its own - start it manually:
+#   tools/llama.cpp/llama-b11379/llama-server \
+#     -m models/qwen3/Qwen3-4B-Instruct-2507-Q4_K_M.gguf \
+#     -c 4096 -np 1 -t 4 -b 1024 -ub 512 -ctk q8_0 -ctv q8_0 \
+#     --host 127.0.0.1 --port 8080
 [models.llama_server]
-enabled = false
+enabled = true
 base_url = "http://127.0.0.1:8080"
 model = "qwen3-4b"
 timeout_seconds = 120

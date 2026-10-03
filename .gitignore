@@ -26,5 +26,9 @@ nova/artifacts/output/*
 # Secrets / local env
 .env
 
+# Local inference runtime and model weights (never committed; see README)
+tools/
+models/
+
 # Client chat exports
 freebuff-chat-*.md

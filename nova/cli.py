@@ -28,6 +28,7 @@ from nova.memory import ShortTermMemory
 from nova.models import ModelRouter, TaskType
 from nova.models import (
     LlamaServerClient,
+    LlamaServerError,
     ModelRouter,
     StubModelClient,
     TaskType,
@@ -95,7 +96,17 @@ def cmd_chat(args: argparse.Namespace, settings: Settings) -> int:
             print("memory cleared.")
             continue
 
-        result = orch.handle(user_input)
+        result = None
+        try:
+            result = orch.handle(user_input)
+        except LlamaServerError as exc:
+            # M1-B honesty rule: a failed real request is reported as a
+            # failure. NOVA never silently swaps in the mock.
+            print(f"[real backend unavailable] {exc}")
+            print("NOVA did NOT fall back to the mock. Start llama-server "
+                  "(see README 'Starting the brain') or set brain = \"stub\" "
+                  "in config/nova.toml.\n")
+            continue
         label = "nova(mock)" if result.is_mock else f"nova({result.model_id})"
         print(f"{label}> {result.text}\n")
 

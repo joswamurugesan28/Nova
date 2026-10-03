@@ -29,13 +29,18 @@ Rule: a milestone is done only when tests pass, CLI works, and CHANGELOG.md is u
 - [x] Mock-HTTP test suite (no server, no model required)
 - **Explicitly out of scope:** llama.cpp not installed, no model downloaded, no inference benchmarked, no Ollama
 
-### M1-B — real inference (requires explicit approval to download)
-- [ ] Install/build `llama-server` (user-space, no sudo)
-- [ ] Download Qwen3 4B GGUF (Q4_K_M, Instruct-2507) — **awaiting user go-ahead**
-- [ ] Enable `brain = "llama-server"` + `enabled = true`, verify first honest non-mock turn
-- [ ] Graceful fallback to stub when the server dies mid-session
-- [ ] Streaming responses in the CLI chat
-- [ ] Token/context budget management (4k ctx, KV-cache sizing for 8 GB)
+### M1-B — real inference ✅ (complete)
+- [x] llama.cpp runtime: **official prebuilt `llama-server` v0.5.0-dev (b11379)** extracted to `tools/llama.cpp/llama-b11379/` (user-space; no sudo; source build skipped because `cmake` is missing)
+- [x] Model: **unsloth `Qwen3-4B-Instruct-2507-Q4_K_M.gguf`** → `models/qwen3/` (2,497,281,120 bytes; sha256 verified vs HF authoritative etag; GGUF v3 arch `qwen3` confirmed; llama.cpp loads it)
+- [x] First real inference: prompts A–D answered by Qwen3, `is_mock=False`, no canned fallback; streaming verified progressive (30 chunks / 2.61 s spread)
+- [x] Benchmark: startup 5 s · pp512 35.4 t/s · tg128 **11.1 t/s @ t4 vs 8.7 @ t8** · ctx 4096 costs ~150 MB more than 2048 → keep 4096 · ~2.0 GB server RssAnon · 4 threads selected
+- [x] Config: `brain = "llama-server"`, `enabled = true` (switch back to `brain = "stub"` without code changes)
+- [x] Failure honesty: chat reports `[real backend unavailable]`, never silently falls back to mock text (tested)
+- [x] Tests: default suite 87/87 green (no server required); optional `integration_tests/` suite 5/5 against the real model (auto-skips when server is down)
+- [x] Docs updated (README/ARCHITECTURE/ROADMAP/CHANGELOG)
+- [ ] Streaming output in interactive `nova chat` (client supports it; CLI buffers full responses)
+- [ ] NOVA-side token/context budgeting (server fixed at `-c 4096` for now)
+- [ ] Mid-session server-death recovery (restart guidance only)
 
 ## M2 — Perception (vision + speech)
 - [ ] Qwen3-VL 4B as `TaskType.VISION` (image input path)

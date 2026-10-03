@@ -39,7 +39,7 @@ orchestrator. Data flows through explicit interfaces only.
 | Orchestrator | `nova/core/orchestrator.py` | turn pipeline: memory → prompt → router → memory | working |
 | Config | `nova/config.py` + `config/nova.toml` | TOML settings, validation, path resolution | working |
 | Logging | `nova/logging_setup.py` | rotating file (`logs/`) + console, namespaced loggers | working |
-| Model layer | `nova/models/` | `ModelClient` interface, `ModelRouter`, backend factory, stub + llama-server clients | working (stub default; llama-server interface ready) |
+| Model layer | `nova/models/` | `ModelClient` interface, `ModelRouter`, backend factory, stub + llama-server clients | working — **real inference online (M1-B)** |
 | Personality | `nova/personality/` | config-driven system prompt + style injection | working |
 | Memory | `nova/memory/` | bounded short-term context buffer | working (in-memory) |
 | Tools | `nova/tools/` | register/dispatch mechanics for LLM tool calls | registry only |
@@ -55,11 +55,12 @@ orchestrator. Data flows through explicit interfaces only.
   interchangeable without touching the orchestrator.
 - Backend *selection* happens in one place, `nova/models/factory.py`,
   from the `[models]` section of `config/nova.toml`:
-  - `brain = "stub"` (default) → honest mock `StubModelClient`
   - `brain = "llama-server"` + `[models.llama_server] enabled = true`
-    → `LlamaServerClient` (real HTTP inference client)
+    → `LlamaServerClient` (**current default, M1-B — real inference**)
+  - `brain = "stub"` → honest mock `StubModelClient` (one-line switch,
+    no code change)
   - disabled or unknown backend → **stub fallback with a logged warning**
-    (safe by default; M0 behavior is unchanged)
+    (safe by default)
 - `nova model status` probes `GET /health` and reports
   `RUNNING` / `NOT RUNNING` — it **never starts or stops a server**.
 - Any response with `is_mock=True` is surfaced as such in the CLI and logs.
@@ -68,22 +69,33 @@ orchestrator. Data flows through explicit interfaces only.
 
 ```
 ModelClient                    (the abstraction boundary)
-├── StubModelClient            mock, is_mock=True, default
-├── LlamaServerClient          M1-A: HTTP/OpenAI-compatible client for
-│                              an EXTERNAL llama-server process
-│                              (stdlib urllib; health check, non-stream
-│                              + SSE streaming, timeouts, typed errors;
+├── LlamaServerClient          REAL inference (M1-B): HTTP/OpenAI-compatible
+│                              client for an EXTERNAL llama-server process
+│                              (stdlib urllib; health check, non-stream +
+│                              SSE streaming, timeouts, typed errors;
 │                              is_mock=False — errors raise, never fake)
+├── StubModelClient            mock, is_mock=True, fallback (config switch)
 ├── OllamaClient               future candidate, same interface
 └── future backends            vision / STT / TTS clients (M2)
 ```
 
-**M1-A boundary:** NOVA does not embed llama.cpp, does not manage the
-server lifecycle, and no model weights exist on disk yet. The client
-only speaks HTTP to `base_url`. Config knobs in
-`[models.llama_server]`: `enabled`, `base_url`, `model`,
-`timeout_seconds`, `health_timeout_seconds`, `context_size`,
-`temperature`, `max_tokens`.
+**M1-B runtime (measured on target hardware):**
+
+- Runtime: official llama.cpp prebuilt `llama-server` v0.5.0-dev (b11379),
+  user-space at `tools/llama.cpp/llama-b11379/` (no sudo, no build —
+  `cmake` is absent on this machine, so the official binary was chosen).
+- Model: `models/qwen3/Qwen3-4B-Instruct-2507-Q4_K_M.gguf`
+  (unsloth, GGUF v3, arch `qwen3`, 4.02 B params, 2,497,281,120 bytes,
+  sha256 verified against Hugging Face's authoritative X-Linked-Etag).
+- Launch: `-c 4096 -np 1 -t 4 -b 1024 -ub 512 -ctk q8_0 -ctv q8_0`
+  — 4 threads beat 8 (11.1 vs 8.7 t/s tg128); `-np 1` keeps a single
+  4096-token slot (the default 4 slots quadrupled KV for no benefit);
+  q8_0 KV saves ~300 MB. Weights are mmap'd → reclaimable page cache.
+- NOVA never manages the server lifecycle; `[models.llama_server]`
+  config knobs: `enabled`, `base_url`, `model`, `timeout_seconds`,
+  `health_timeout_seconds`, `context_size`, `temperature`, `max_tokens`.
+- Honesty invariant: when the real backend fails, the CLI reports
+  `[real backend unavailable]` and never substitutes mock text.
 
 ## Artifact Engine (first-class module)
 
@@ -144,7 +156,6 @@ memory bounded (rolling buffer + future SQLite with pruning).
 
 ## Evolution
 
-M0 scaffold ✅ → M1-A llama-server interface ✅ → M1-B local brain (model
-+ server, needs explicit approval) → M2 vision/STT/TTS → M3 artifact
-handlers → M4 LLM-driven tool & artifact planning → M5 hardening.
-See ROADMAP.md.
+M0 scaffold ✅ → M1-A llama-server interface ✅ → M1-B local brain online ✅
+→ M2 vision/STT/TTS → M3 artifact handlers → M4 LLM-driven tool &
+artifact planning → M5 hardening. See ROADMAP.md.

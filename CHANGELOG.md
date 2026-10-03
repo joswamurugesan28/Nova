@@ -4,6 +4,24 @@ All notable changes to NOVA are recorded here. Format follows [Keep a Changelog]
 
 ## [Unreleased]
 
+## [M1-B] — 2026-10-03
+
+### Added
+- **Real local inference online.** Runtime: official llama.cpp prebuilt `llama-server` v0.5.0-dev (build b11379) extracted **user-space** to `tools/llama.cpp/llama-b11379/` (no sudo, no system packages; source build skipped because `cmake` is unavailable). Model: `models/qwen3/Qwen3-4B-Instruct-2507-Q4_K_M.gguf` from `unsloth/Qwen3-4B-Instruct-2507-GGUF` — 2,497,281,120 bytes, **sha256 `3605803b982cb64aead44f6c1b2ae36e3acdb41d8e46c8a94c6533bc4c67e597` verified against Hugging Face's authoritative `X-Linked-Etag`**, GGUF v3 metadata confirmed (arch `qwen3`, name `Qwen3-4B-Instruct-2507`, `general.file_type=15` = MOSTLY_Q4_K_M, 4.02 B params, Q4_K/Q6_K tensor mix).
+- **Server configuration (measured on target hardware):** `-c 4096 -np 1 -t 4 -b 1024 -ub 512 -ctk q8_0 -ctv q8_0 --host 127.0.0.1 --port 8080`. Chosen from benchmarks: 4 threads beat 8 (tg128 11.1 vs 8.7 t/s), `-np 1` avoids the default 4-slot 16k KV, q8_0 KV saves ~300 MB.
+- **Benchmarks (measured, not estimated):** startup → `/health 200` in 5 s · prompt processing pp512 = 35.4 t/s · generation tg128 = 11.1 t/s @ t4 · live chat ≈ 10 t/s · streaming first token ≈ 0.7 s · server RssAnon ≈ 2.0 GB (ctx4096; ctx2048 saves ~150 MB) · system available ≈ 2.3 GB during generation · CPU 200–270 %.
+- **Config integration:** `config/nova.toml` now ships `brain = "llama-server"` + `[models.llama_server] enabled = true`; switching back to the mock is `brain = "stub"` (no code change). Full start command documented in README/ARCHITECTURE/config comments.
+- **Failure honesty in CLI chat:** a dead real backend prints `[real backend unavailable]` + recovery guidance and **never** substitutes mock text (unit-tested with a dead port).
+- **Optional integration tests** (`integration_tests/test_real_brain.py`, outside `tests/` so the default suite never needs the server): health, non-mock generation, trivial answer, progressive streaming, orchestrator end-to-end — 5/5 passing against the live model, auto-skip when the server is down.
+- **Docs:** README (start procedure, measured benchmarks, RAM/limitations, switching), ARCHITECTURE (M1-B runtime + honesty invariant), ROADMAP (M1-B checked), CHANGELOG.
+- `.gitignore`: `tools/` and `models/` excluded (runtime + weights are never committed).
+
+### Changed
+- `tests/test_config.py::test_default_config_file_loads` and `tests/test_llama_server.py::LlamaServerConfigTests.test_defaults` updated: the shipped config now declares the real brain, and built-in-default assertions moved to a config without `[models.llama_server]`. No tests deleted; default suite **87/87 passing**.
+
+### Known limitations
+- Interactive `nova chat` buffers full responses (client streaming verified but not yet wired into the REPL); no NOVA-side context budgeting; server lifecycle fully manual; 8 GB RAM means one model resident at a time.
+
 ## [M1-A] — 2026-10-03
 
 ### Added
