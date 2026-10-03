@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+
+# Test / tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Runtime logs (keep directory, ignore log files)
+logs/*
+!logs/.gitkeep
+
+# Artifact Engine runtime directories (keep directory markers)
+nova/artifacts/workspace/*
+!nova/artifacts/workspace/.gitkeep
+nova/artifacts/output/*
+!nova/artifacts/output/.gitkeep
+
+# Secrets / local env
+.env
+
+# Client chat exports
+freebuff-chat-*.md

@@ -1,0 +1,29 @@
+[project]
+name = "nova-assistant"
+version = "0.1.0"
+description = "NOVA - Neural Operations & Vision Assistant: a modular personal AI assistant"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "NOVA Project" }]
+keywords = ["ai", "assistant", "local-llm", "artifacts"]
+dependencies = []
+
+[project.optional-dependencies]
+# Intentionally empty for M0. Real backends (llama.cpp / whisper / TTS) and
+# artifact libraries (python-docx, python-pptx, openpyxl, reportlab, pandas)
+# are added in later milestones. See ROADMAP.md.
+dev = ["pytest>=8"]
+
+[project.scripts]
+nova = "nova.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["nova*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
