@@ -2,7 +2,7 @@
 
 NOVA is a modular personal AI assistant that can **converse, remember, use tools, and create/modify real work files** (DOCX, PPTX, XLSX, PDF, CSV, images) — running locally on consumer hardware.
 
-**Status: M0 (scaffold).** All model backends are stubs. No AI inference happens yet — every mock response is explicitly labeled as such.
+**Status: M1-A.** The llama-server backend *interface* is implemented but **no model and no server are installed yet** — the default remains the mock stub, and every mock response is explicitly labeled as such.
 
 ## Design goals
 
@@ -31,7 +31,8 @@ NOVA/
 │   ├── config.py           # settings loading + validation
 │   ├── logging_setup.py    # rotating file + console logging
 │   ├── core/orchestrator.py# turn pipeline wiring everything together
-│   ├── models/             # ModelClient interface, router, stub backend
+│   ├── models/             # ModelClient interface, router, factory,
+│   │                       #   stub + llama-server backends
 │   ├── personality/        # dynamic personality engine (prompt assembly)
 │   ├── memory/             # short-term context buffer
 │   ├── tools/              # tool registry (LLM tool-calling comes later)
@@ -52,10 +53,35 @@ python3 -m nova version       # print version
 python3 -m nova config        # show effective configuration
 python3 -m nova routes        # show model routing table (all stub in M0)
 python3 -m nova artifacts     # show Artifact Engine status
-python3 -m nova chat          # interactive chat (MOCK backend in M0)
+python3 -m nova model status   # check llama-server reachability (never starts it)
+python3 -m nova chat          # interactive chat (MOCK backend by default)
 ```
 
 Chat commands: `/help` `/memory` `/routes` `/clear` `/exit`
+
+## Model backends (M1-A)
+
+| Backend | Status | Notes |
+|---|---|---|
+| `stub` | working (**default**) | Honest mock, labeled everywhere, zero dependencies |
+| `llama-server` | client ready, **intentionally not installed** | Real OpenAI-compatible HTTP client (`nova/models/llama_server.py`); needs a manually started `llama-server` + a Qwen3 4B GGUF — **neither has been downloaded** |
+
+The `ModelClient` interface is the abstraction boundary; future backends
+(`OllamaClient`, vision, STT, TTS) plug in the same way:
+
+```
+ModelClient
+├── StubModelClient      (default, mock)
+├── LlamaServerClient    (M1-A, HTTP)
+└── future backends
+```
+
+**To use llama-server later (not part of M1-A):** start `llama-server`
+yourself with a Qwen3 4B GGUF, then set `brain = "llama-server"` **and**
+`[models.llama_server] enabled = true` in `config/nova.toml`. NOVA never
+starts/stops servers and never downloads models. Verify with
+`nova model status`. If the server is down or the backend is disabled,
+NOVA safely falls back to the labeled stub.
 
 ## Running tests
 

@@ -1,14 +1,17 @@
 """NOVA command-line interface.
 
 Commands:
-    nova chat       interactive REPL (default when no command given)
-    nova routes     show model routing table
-    nova artifacts  show Artifact Engine status
-    nova config     print effective configuration
-    nova version    print version
+    nova chat         interactive REPL (default when no command given)
+    nova routes       show model routing table
+    nova artifacts    show Artifact Engine status
+    nova config       print effective configuration
+    nova model status check llama-server reachability (never starts it)
+    nova version      print version
 
-M0 honesty guarantee: if any response comes from the mock backend the
-CLI prints a clear warning that no real inference occurred.
+Honesty guarantee: if the active backend is the mock stub, the CLI
+prints a clear warning that no real inference occurred. The llama-server
+backend (M1-A) is a real inference client, but only used when the user
+explicitly enables it AND a manually started llama-server is reachable.
 """
 
 from __future__ import annotations
@@ -23,6 +26,14 @@ from nova.core import Orchestrator
 from nova.logging_setup import get_logger, setup_logging
 from nova.memory import ShortTermMemory
 from nova.models import ModelRouter, TaskType
+from nova.models import (
+    LlamaServerClient,
+    ModelRouter,
+    StubModelClient,
+    TaskType,
+    active_backend_name,
+    build_router,
+)
 from nova.personality import PersonalityEngine
 from nova.tools import ToolRegistry
 
@@ -33,8 +44,8 @@ MOCK_BANNER = (
 
 
 def build_orchestrator(settings: Settings) -> Orchestrator:
-    """Wire the M0 component graph from configuration."""
-    router = ModelRouter.with_stub()
+    """Wire the NOVA component graph from configuration (M1-A)."""
+    router = build_router(settings.models)
     memory = ShortTermMemory(max_entries=50)
     personality = PersonalityEngine(settings.personality)
     artifacts = ArtifactEngine(settings.artifacts)
@@ -50,8 +61,11 @@ def build_orchestrator(settings: Settings) -> Orchestrator:
 
 def cmd_chat(args: argparse.Namespace, settings: Settings) -> int:
     orch = build_orchestrator(settings)
-    print(f"{settings.app_name} v{settings.app_version} (M0 scaffold)")
-    print(MOCK_BANNER)
+    brain = orch.router.resolve(TaskType.CHAT)
+    print(f"{settings.app_name} v{settings.app_version} - brain backend: "
+          f"{brain.describe()}")
+    if isinstance(brain, StubModelClient):
+        print(MOCK_BANNER)
     print("Type /help for commands, /exit to quit.\n")
 
     while True:
@@ -125,7 +139,38 @@ def cmd_config(args: argparse.Namespace, settings: Settings) -> int:
     for task in TaskType:
         key = "brain" if task is TaskType.CHAT else task.value
         print(f"  {task.value:<10} -> {getattr(settings.models, key)}")
+    ls = settings.models.llama_server
+    print("llama-server :")
+    print(f"  enabled    : {ls.enabled}")
+    print(f"  base_url   : {ls.base_url}")
+    print(f"  model      : {ls.model}")
+    print(f"  timeout    : {ls.timeout_seconds}s (health {ls.health_timeout_seconds}s)")
+    print(f"  ctx/temp   : {ls.context_size} / {ls.temperature} (max_tokens {ls.max_tokens})")
     return 0
+
+
+def cmd_model(args: argparse.Namespace, settings: Settings) -> int:
+    """Model backend diagnostics. NEVER starts a server (exit 0=reachable,
+    1=not reachable)."""
+    if args.model_command != "status":
+        print(f"unknown model command: {args.model_command}", file=sys.stderr)
+        return 2
+
+    ls = settings.models.llama_server
+    client = LlamaServerClient(ls, base_url=args.url) if args.url \
+        else LlamaServerClient(ls)
+    status = client.check_health()
+    state = "RUNNING" if status.healthy else "NOT RUNNING"
+
+    print("Backend: llama-server")
+    print(f"URL: {client.base_url}")
+    print(f"Model: {ls.model}")
+    print(f"Enabled: {'yes' if ls.enabled else 'no'} "
+          f"(brain backend: {settings.models.brain}; "
+          f"active: {active_backend_name(build_router(settings.models))})")
+    print(f"Status: {state} ({status.detail})")
+    print("Note: NOVA never starts llama-server automatically.")
+    return 0 if status.healthy else 1
 
 
 def cmd_version(args: argparse.Namespace, settings: Settings) -> int:
@@ -136,16 +181,24 @@ def cmd_version(args: argparse.Namespace, settings: Settings) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="nova",
-        description="NOVA - Neural Operations & Vision Assistant (M0 scaffold)",
+        description="NOVA - Neural Operations & Vision Assistant (M1-A)",
     )
     parser.add_argument("--config", metavar="PATH",
                         help="path to a TOML config file (default: config/nova.toml)")
     sub = parser.add_subparsers(dest="command")
-    sub.add_parser("chat", help="interactive chat (mock backend in M0)")
+    sub.add_parser("chat", help="interactive chat (mock backend by default)")
     sub.add_parser("routes", help="show model routing table")
     sub.add_parser("artifacts", help="show Artifact Engine status")
     sub.add_parser("config", help="print effective configuration")
     sub.add_parser("version", help="print version")
+    model = sub.add_parser("model", help="model backend diagnostics")
+    model_sub = model.add_subparsers(dest="model_command", required=True)
+    status = model_sub.add_parser(
+        "status", help="check whether llama-server is reachable "
+                       "(never starts it)"
+    )
+    status.add_argument("--url", metavar="URL",
+                        help="override the configured base URL for this check")
     return parser
 
 
@@ -168,6 +221,7 @@ def main(argv: list[str] | None = None) -> int:
         "routes": cmd_routes,
         "artifacts": cmd_artifacts,
         "config": cmd_config,
+        "model": cmd_model,
         "version": cmd_version,
     }
     return handlers[command](args, settings)

@@ -4,6 +4,19 @@ All notable changes to NOVA are recorded here. Format follows [Keep a Changelog]
 
 ## [Unreleased]
 
+## [M1-A] — 2026-10-03
+
+### Added
+- **llama-server backend interface** (`nova/models/llama_server.py`): `LlamaServerClient` implements `ModelClient` over llama.cpp `llama-server`'s HTTP/OpenAI-compatible API using **only the standard library** (`urllib` + `json`). Supports configurable base URL/model metadata, `GET /health` health checks, non-streaming chat completion, SSE streaming (`stream()`), configurable timeouts, and typed error handling (`ServerUnreachableError`, `RequestTimeoutError`, `MalformedResponseError`, generic `LlamaServerError`). Errors are raised, never converted into fake text; real responses carry `is_mock=False`.
+- **Backend factory** (`nova/models/factory.py`): maps `[models]` config names to clients — `stub` (default, unchanged M0 behavior) or `llama-server`; disabled/unknown backends fall back to the stub with a logged warning (safe by default). Non-chat tasks remain on the stub until M2/M4.
+- **Configuration**: `[models.llama_server]` section (`enabled = false`, `base_url`, `model`, `timeout_seconds`, `health_timeout_seconds`, `context_size`, `temperature`, `max_tokens`) added to `config/nova.toml` and parsed in `nova/config.py`. `ModelSettings` gained a `llama_server` field; all defaults preserve M0 behavior.
+- **CLI**: `nova model status [--url URL]` diagnostic — reports `Backend` / `URL` / `Model` / `Enabled` / `Status: RUNNING|NOT RUNNING` and **never starts a server** (exit 0 = reachable, 1 = not reachable). `nova config` now prints the llama-server settings; the chat banner only shows the MOCK warning when the stub is actually active.
+- **Tests**: `tests/test_llama_server.py` — 26 new tests using a stdlib `http.server` mock (no llama-server, no model, no network): health success/failure/timeout/refused, completion success + payload shape, timeout, connection refused, malformed JSON, bad shape, null content, HTTP 500, streaming deltas/malformed/refused, factory selection, config parsing, and `model status` CLI behavior.
+- **Docs**: README (backends table + enable instructions), ARCHITECTURE (routing rules + backend implementations), ROADMAP (M1 split into M1-A ✅ / M1-B pending).
+
+### Not changed
+- No model downloaded, no llama.cpp/Ollama installed, no inference benchmarked, no dependencies added, M0 architecture and all 59 M0 tests preserved.
+
 ## [M0] — 2026-10-03
 
 ### Added

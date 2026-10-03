@@ -19,12 +19,23 @@ Rule: a milestone is done only when tests pass, CLI works, and CHANGELOG.md is u
 - **Out of scope:** any real model, any format library, downloads
 
 ## M1 — Local brain
-- [ ] Choose backend (llama-cpp-python vs Ollama) under 8 GB RAM budget
-- [ ] Integrate Qwen3 4B (GGUF, quantized) as `TaskType.CHAT` client
-- [ ] Config-driven model selection + graceful fallback to stub with clear labeling
-- [ ] Streaming responses in CLI
-- [ ] Token/context budget management
-- [ ] First *real* conversation end-to-end
+
+### M1-A — llama-server backend interface ✅ (current)
+- [x] `LlamaServerClient` implementing `ModelClient` over llama-server's HTTP/OpenAI API (stdlib only)
+- [x] Health checking, normal + SSE streaming completion, timeouts, typed error handling (unreachable / timeout / malformed / HTTP error)
+- [x] Backend selection in `nova/models/factory.py` (`stub` | `llama-server`, safe stub fallback)
+- [x] Config: `[models.llama_server]` (`enabled`, `base_url`, `model`, `timeout_seconds`, `health_timeout_seconds`, `context_size`, `temperature`, `max_tokens`)
+- [x] CLI diagnostic `nova model status` (reports RUNNING / NOT RUNNING; **never starts the server**)
+- [x] Mock-HTTP test suite (no server, no model required)
+- **Explicitly out of scope:** llama.cpp not installed, no model downloaded, no inference benchmarked, no Ollama
+
+### M1-B — real inference (requires explicit approval to download)
+- [ ] Install/build `llama-server` (user-space, no sudo)
+- [ ] Download Qwen3 4B GGUF (Q4_K_M, Instruct-2507) — **awaiting user go-ahead**
+- [ ] Enable `brain = "llama-server"` + `enabled = true`, verify first honest non-mock turn
+- [ ] Graceful fallback to stub when the server dies mid-session
+- [ ] Streaming responses in the CLI chat
+- [ ] Token/context budget management (4k ctx, KV-cache sizing for 8 GB)
 
 ## M2 — Perception (vision + speech)
 - [ ] Qwen3-VL 4B as `TaskType.VISION` (image input path)
