@@ -16,9 +16,8 @@ Design notes
 * Streaming (``stream()``) yields text deltas from the SSE
   ``/v1/chat/completions`` stream; ``generate()`` uses the non-streaming
   completion endpoint.
-* Future-ready: message payload accepts an optional ``system`` entry in
-  ``request.metadata``; tool/vision params will extend the payload
-  without changing this interface (see ROADMAP.md M4/M2).
+* The message payload accepts role-tagged ``messages`` and function ``tools``
+  in ``request.metadata`` for the initial M4 filesystem tool round.
 
 The server lifecycle (installing llama.cpp, downloading Qwen3 4B GGUF,
 starting ``llama-server``) is intentionally OUT OF SCOPE for M1-A.
@@ -125,12 +124,16 @@ class LlamaServerClient(ModelClient):
         return data
 
     def _payload(self, request: ModelRequest, *, stream: bool) -> dict:
-        messages: list[dict] = []
-        system = request.metadata.get("system")
-        if isinstance(system, str) and system.strip():
-            messages.append({"role": "system", "content": system})
-        messages.append({"role": "user", "content": request.prompt})
-        return {
+        supplied_messages = request.metadata.get("messages")
+        if isinstance(supplied_messages, list):
+            messages = supplied_messages
+        else:
+            messages: list[dict] = []
+            system = request.metadata.get("system")
+            if isinstance(system, str) and system.strip():
+                messages.append({"role": "system", "content": system})
+            messages.append({"role": "user", "content": request.prompt})
+        payload = {
             "model": self.settings.model,
             "messages": messages,
             "temperature": self.settings.temperature,
@@ -139,6 +142,11 @@ class LlamaServerClient(ModelClient):
             # informational only: llama-server takes -c at startup, not per request
             "nova_context_size": self.settings.context_size,
         }
+        tools = request.metadata.get("tools")
+        if isinstance(tools, list) and tools:
+            payload["tools"] = tools
+            payload["tool_choice"] = "auto"
+        return payload
 
     # ------------------------------------------------------------------ #
     # Health
@@ -195,16 +203,42 @@ class LlamaServerClient(ModelClient):
         body = self._decode_json(raw, self._endpoint)
         try:
             choice = body["choices"][0]
-            content = choice["message"]["content"]
+            message = choice["message"]
         except (KeyError, IndexError, TypeError) as exc:
             raise MalformedResponseError(
                 f"completion response from {self._endpoint} is missing "
                 f"choices[0].message.content"
             ) from exc
+        if not isinstance(message, dict):
+            raise MalformedResponseError("completion message must be a JSON object")
+        raw_calls = message.get("tool_calls", [])
+        if not isinstance(raw_calls, list):
+            raise MalformedResponseError("message.tool_calls must be an array")
+        tool_calls: list[dict] = []
+        for call in raw_calls:
+            if not isinstance(call, dict) or not isinstance(call.get("function"), dict):
+                raise MalformedResponseError("each tool call must contain a function object")
+            function = call["function"]
+            name = function.get("name")
+            arguments = function.get("arguments", "{}")
+            if not isinstance(name, str) or not isinstance(arguments, (str, dict)):
+                raise MalformedResponseError("tool call name/arguments have invalid types")
+            if isinstance(arguments, dict):
+                arguments = json.dumps(arguments)
+            tool_calls.append({
+                "id": str(call.get("id") or ""),
+                "type": "function",
+                "function": {"name": name, "arguments": arguments},
+            })
+        content = message.get("content")
+        if content is None and tool_calls:
+            content = ""
         if not isinstance(content, str):
             raise MalformedResponseError(
                 f"expected string message content, got {type(content).__name__}"
             )
+        if not content and not tool_calls:
+            raise MalformedResponseError("completion returned neither content nor tool calls")
 
         served_model = body.get("model") or self.settings.model
         return ModelResponse(
@@ -215,6 +249,7 @@ class LlamaServerClient(ModelClient):
                 "backend": "llama-server",
                 "finish_reason": choice.get("finish_reason"),
                 "usage": body.get("usage", {}),
+                "tool_calls": tool_calls,
             },
         )
 

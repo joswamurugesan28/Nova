@@ -9,6 +9,10 @@ from nova.tools import (
     ToolRegistry,
     UnknownToolError,
 )
+from nova.tools.executor import EventBus, ToolExecutor
+from nova.tools.filesystem import register_filesystem_tools
+from pathlib import Path
+import tempfile
 
 
 class ToolRegistryTests(unittest.TestCase):
@@ -51,6 +55,48 @@ class ToolRegistryTests(unittest.TestCase):
 
     def test_registry_starts_empty_in_m0(self) -> None:
         self.assertEqual(len(self.registry), 0)
+
+    def test_filesystem_tool_loop_lists_visible_files_and_emits_events(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "hello.txt").write_text("hello", encoding="utf-8")
+            (root / ".hidden").write_text("secret", encoding="utf-8")
+            register_filesystem_tools(self.registry, root)
+            events = EventBus()
+            seen = []
+            events.subscribe("tool.completed", lambda event: seen.append(event.name))
+
+            result = ToolExecutor(self.registry, events).execute(
+                "filesystem.list_files"
+            )
+
+        self.assertEqual(result["entries"], [{"path": "hello.txt", "size": 5}])
+        self.assertEqual(seen, ["tool.completed"])
+
+    def test_filesystem_tool_rejects_escape(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "project"
+            root.mkdir()
+            register_filesystem_tools(self.registry, root)
+            with self.assertRaises(PermissionError):
+                self.registry.dispatch("filesystem.list_files", path="../")
+
+    def test_filesystem_tool_schema_does_not_expose_root(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            register_filesystem_tools(self.registry, directory)
+            schema = self.registry.model_schemas()[0]["function"]
+        self.assertEqual(schema["name"], "filesystem.list_files")
+        self.assertIn("path", schema["parameters"]["properties"])
+        self.assertNotIn("root", schema["parameters"]["properties"])
+
+    def test_project_folder_label_resolves_to_selected_root(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "NOVA"
+            root.mkdir()
+            (root / "root.txt").write_text("ok", encoding="utf-8")
+            register_filesystem_tools(self.registry, root)
+            result = self.registry.dispatch("filesystem.list_files", path="NOVA Folder")
+        self.assertEqual(result["entries"], [{"path": "root.txt", "size": 2}])
 
 
 if __name__ == "__main__":

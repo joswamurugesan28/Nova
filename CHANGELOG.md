@@ -4,6 +4,32 @@ All notable changes to NOVA are recorded here. Format follows [Keep a Changelog]
 
 ## [Unreleased]
 
+### Added
+- **Screenshot backend discovery:** X11Provider.discover_screenshot_backend, honest unavailable reporting.
+- **Visual Desktop Intelligence:** screenshot capture tool, vision provider abstraction, describe_screen; honest unavailable reporting.
+- **Desktop provider improvements:** X11 window listing via xlsclients, active window via xprop; verified desktop.inspect end-to-end.
+- **Desktop inspection tool integration:** register desktop.inspect in ToolRegistry and wire into orchestrator prompt.
+- **Autonomous Environment Operations (Phase G):** package execution, UniversalExecutor integration, verification.
+- **Universal Environment & Software Management (Phase F):** package managers, discovery, planner, diagnostics.
+- **Workflow Reliability, Persistence and Approval (Phase E.8):** SQLite store, approval pause/resume, recovery hooks.
+- **Cross-Application Workflow Orchestration (Phase E.7):** workflow engine, DAG, context, artifacts.
+- **Autonomous Execution Integration and Safe Recovery (Phase E.6):** resolver integrated, safety classes, execution states, safe fallback.
+- **Autonomous Provider Selection (Phase E.5):** ProviderResolver with ranking, capability overrides, fallback; ApplicationProfile.
+- **Universal Execution Pipeline (Phase E.4):** UniversalExecutor with discovery→capability→provider→permission→execution→verification→audit.
+- **Universal Application Intelligence (Phase E.3):** discovery states, capability profiles, universal providers, interface selector.
+- **Blender integration (Phase E.2):** BlenderBridge + BlenderAdapter with approval-gated operations, mock tests.
+- **VS Code integration + discovery improvements (Phase E.1):** improved multi-source discovery, VSCodeAdapter with safe file ops.
+- **Multi-Application Intelligence foundation (Phase E):** capability discovery, adapter stubs for Blender/Kdenlive/FL Studio/VS Code.
+- **Operational Ubuntu Desktop Providers (Phase D.1):** real X11/Wayland/AT-SPI best-effort providers, emergency stop.
+- **Universal Desktop Awareness (Phase D):** `nova/gui/` provider abstraction, DesktopObserver, GUIController (approval-gated), mock/X11/Wayland/AT-SPI providers. Tests.
+- **Security hardening pass:** token weakness rejection, backup verification + rollback, audit backup metadata, response size limits, plugin default-token guard.
+- **Godot integration (Phase B):** `nova/apps/godot/` (bridge client, adapter), `nova/tools/godot.py` tool registration, Godot EditorPlugin under `godot_plugin/`. Bridge binds 127.0.0.1:47821 with bearer auth. Tests: bridge, adapter.
+- **Application Awareness foundations (Phase A):** `nova/apps/` package with `ApplicationAdapter` interface, `ApplicationRegistry`, centralized `PermissionEngine` (read-only auto, gated modifications/execution/destructive), and append-only `AuditLog` (JSONL). Config sections `[permissions]`, `[audit]`, `[apps]` added. Tests: permissions, audit, registry.
+- **Animated thinking spinner in `nova chat`:** while a real model request is in flight, the terminal shows a spinner beside a randomly chosen status message on a single line. The status rotates every 1-2 seconds and never immediately repeats the previous message. When the request finishes or errors, the animation stops cleanly, the final status stays visible on its own line, and NOVA's response (or the `[real backend unavailable]` / `[context too large]` error) prints on the next line. Shown only for real `llama-server` requests on a real TTY — never for the stub backend and never on piped output. Existing tool status messages and error handling are preserved.
+- Add a read-only filesystem listing tool and connect its registered schema to real llama-server tool calls in `nova chat`. NOVA validates calls against the registry, executes at most one tool round, sends observations back for a final response, and prevents mock model responses from executing tools. The direct `nova files` command remains available. File contents are never read and tool paths stay under the trusted project root.
+- Clarify that mentions of the NOVA/project/root folder mean the already-selected project root, map the root's friendly name to `.`, and show in chat whether a tool actually ran or failed.
+- Restore the orchestrator prompt-building methods required by the in-progress session/context changes and avoid duplicate inference when collecting a streaming response.
+
 ## [M1-B] — 2026-10-03
 
 ### Added

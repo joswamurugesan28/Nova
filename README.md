@@ -41,7 +41,7 @@ NOVA/
 │   │                       #   stub + llama-server backends
 │   ├── personality/        # dynamic personality engine (prompt assembly)
 │   ├── memory/             # short-term context buffer
-│   ├── tools/              # tool registry (LLM tool-calling comes later)
+│   ├── tools/              # registry, executor, and read-only filesystem tool
 │   ├── artifacts/          # ARTIFACT ENGINE: engine, registry, workspace,
 │   │   │                   #   templates, output
 │   ├── vision/             # placeholder (M2: Qwen3-VL)
@@ -57,6 +57,7 @@ Requires Python ≥ 3.11 (stdlib only — zero dependencies).
 
 ```bash
 python3 -m nova version        # print version
+python3 -m nova files          # list visible files in the NOVA project using its filesystem tool
 python3 -m nova config         # show effective configuration
 python3 -m nova routes         # show model routing table
 python3 -m nova model status   # check llama-server reachability (never starts it)
@@ -64,6 +65,16 @@ python3 -m nova chat           # interactive chat (real Qwen3 brain by default)
 ```
 
 Chat commands: `/help` `/memory` `/routes` `/clear` `/exit`
+
+`nova files [relative-directory] [--root PATH]` runs the read-only filesystem
+tool directly. In `nova chat`, the real model may also select that registered
+tool when needed; NOVA validates the call, executes at most one tool round,
+and returns the observed result to the model for a final response. Tool paths
+are confined to the project root, hidden/generated directories are skipped,
+and file contents are not read. The stub backend never executes model tool
+calls and remains visibly labeled as mock.
+
+Example chat request: `List the files in the nova directory.`
 
 ### Starting the brain (manual — NOVA never starts it for you)
 
@@ -116,8 +127,10 @@ llama.cpp b11379 prebuilt, CPU-only, `-t 4 -c 4096 -ctk q8_0 -ctv q8_0`:
   time; do not load a second model alongside the server.
 - Weights are mmap'd (page cache, reclaimable); server anon memory ≈ 2 GB;
   server's own swap footprint ≈ 45 MB.
-- 4B Q4 model quality: fine for chat/summarization; tool-calling and long
-  reasoning are limited (M4 will add constrained decoding).
+- 4B Q4 model quality: fine for chat/summarization; tool selection and long
+  reasoning can be inconsistent, and schema-constrained decoding is not enabled.
+- Conversation history is trimmed with a bounded character count and a rough
+  output reserve; the estimate is not tokenizer-exact.
 - Streaming is supported by the client and verified, but interactive
   `nova chat` still buffers full responses (CLI streaming = future work).
 - Server lifecycle is fully manual (by design): start, stop, restart = you.

@@ -42,7 +42,7 @@ orchestrator. Data flows through explicit interfaces only.
 | Model layer | `nova/models/` | `ModelClient` interface, `ModelRouter`, backend factory, stub + llama-server clients | working — **real inference online (M1-B)** |
 | Personality | `nova/personality/` | config-driven system prompt + style injection | working |
 | Memory | `nova/memory/` | bounded short-term context buffer | working (in-memory) |
-| Tools | `nova/tools/` | register/dispatch mechanics for LLM tool calls | registry only |
+| Tools | `nova/tools/` | model-facing schemas, allow-listed dispatch, and read-only project file listing | one real-model tool round for filesystem listing |
 | Artifact Engine | `nova/artifacts/` | create/modify/validate/save work files | skeleton |
 | Vision | `nova/vision/` | Qwen3-VL integration | placeholder (M2) |
 | Speech | `nova/speech/` | Whisper STT + IndicF5 TTS | placeholder (M2) |
@@ -64,6 +64,16 @@ orchestrator. Data flows through explicit interfaces only.
 - `nova model status` probes `GET /health` and reports
   `RUNNING` / `NOT RUNNING` — it **never starts or stops a server**.
 - Any response with `is_mock=True` is surfaced as such in the CLI and logs.
+- For chat requests, registered tool schemas are passed to the real backend.
+  A returned call is checked against the registry, executed by `ToolExecutor`,
+  and its observation is returned for one final model response. At most one
+  tool round is allowed per user turn. Mock responses cannot trigger tools.
+- The initial tool, `filesystem.list_files`, is read-only, receives its
+  project root from trusted configuration, accepts only a relative subpath,
+  and reports names and sizes without reading file contents.
+- Chat history is trimmed before sending based on a bounded character count
+  with a reserved output allowance. This is approximate and does not replace
+  the server's fixed context window.
 
 ### Backend implementations
 
@@ -157,5 +167,6 @@ memory bounded (rolling buffer + future SQLite with pruning).
 ## Evolution
 
 M0 scaffold ✅ → M1-A llama-server interface ✅ → M1-B local brain online ✅
-→ M2 vision/STT/TTS → M3 artifact handlers → M4 LLM-driven tool &
-artifact planning → M5 hardening. See ROADMAP.md.
+→ M2 vision/STT/TTS → M3 artifact handlers → M4 expanded LLM-driven tool &
+artifact planning → M5 hardening. The initial filesystem tool loop is in place;
+see ROADMAP.md for remaining M4 work.

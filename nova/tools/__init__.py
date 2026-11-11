@@ -1,14 +1,8 @@
-"""Tool registry (M0 skeleton).
+"""Registry for NOVA tools and their model-facing function schemas.
 
-Tools are plain Python callables registered with a name and description.
-The LLM (in a later milestone) decides which tool to call; the registry
-performs the actual dispatch. M0 provides only the registry mechanics -
-no tools and no LLM-driven calling - so nothing is faked.
-
-Design notes for later milestones:
-* tool schemas (JSON) will be derived from the registered signature for
-  function-calling backends
-* execution will gain timeouts, sandboxing, and an allow-list from config
+The model proposes a registered tool call; the registry remains the allow-list
+and dispatches to specialized handlers. Execution and path checks live outside
+the registry.
 """
 
 from __future__ import annotations
@@ -34,6 +28,7 @@ class ToolSpec:
     name: str
     description: str
     handler: Callable[..., Any]
+    parameters: dict[str, Any] | None = None
 
 
 class ToolRegistry:
@@ -43,12 +38,14 @@ class ToolRegistry:
         self._tools: dict[str, ToolSpec] = {}
 
     def register(self, name: str, description: str,
-                 handler: Callable[..., Any], *, replace: bool = False) -> ToolSpec:
+                 handler: Callable[..., Any], *, replace: bool = False,
+                 parameters: dict[str, Any] | None = None) -> ToolSpec:
         if not name or not name.strip():
             raise ValueError("tool name must be a non-empty string")
         if name in self._tools and not replace:
             raise DuplicateToolError(f"tool {name!r} is already registered")
-        spec = ToolSpec(name=name, description=description, handler=handler)
+        spec = ToolSpec(name=name, description=description, handler=handler,
+                        parameters=parameters)
         self._tools[name] = spec
         return spec
 
@@ -71,6 +68,19 @@ class ToolRegistry:
 
     def list_tools(self) -> list[ToolSpec]:
         return sorted(self._tools.values(), key=lambda s: s.name)
+
+    def model_schemas(self) -> list[dict[str, Any]]:
+        """Return tools in the OpenAI-compatible function schema format."""
+        return [
+            {"type": "function", "function": {
+                "name": spec.name,
+                "description": spec.description,
+                "parameters": spec.parameters or {
+                    "type": "object", "properties": {}, "additionalProperties": False,
+                },
+            }}
+            for spec in self.list_tools()
+        ]
 
     def __contains__(self, name: str) -> bool:
         return name in self._tools

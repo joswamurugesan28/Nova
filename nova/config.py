@@ -110,6 +110,24 @@ class ArtifactSettings:
 
 
 @dataclass(frozen=True)
+class PermissionSettings:
+    auto_approve_read: bool = True
+    interactive_approval: bool = True
+
+
+@dataclass(frozen=True)
+class AuditSettings:
+    file: str = "logs/audit.jsonl"
+
+
+@dataclass(frozen=True)
+class AppSettings:
+    enabled: list[str] = field(default_factory=lambda: ["godot"])
+    godot_bridge_port: int = 7456
+    godot_auto_launch: bool = False
+
+
+@dataclass(frozen=True)
 class Settings:
     app_name: str = "NOVA"
     app_version: str = "0.1.0"
@@ -117,6 +135,9 @@ class Settings:
     personality: PersonalitySettings = field(default_factory=PersonalitySettings)
     models: ModelSettings = field(default_factory=ModelSettings)
     artifacts: ArtifactSettings = field(default_factory=ArtifactSettings)
+    permissions: PermissionSettings = field(default_factory=PermissionSettings)
+    audit: AuditSettings = field(default_factory=AuditSettings)
+    apps: AppSettings = field(default_factory=AppSettings)
     config_path: Path | None = None
     project_root: Path = PROJECT_ROOT
 
@@ -140,6 +161,9 @@ def _build_settings(data: dict, config_path: Path | None) -> Settings:
     pers = _section(data, "personality")
     models = _section(data, "models")
     art = _section(data, "artifacts")
+    perm = _section(data, "permissions")
+    aud = _section(data, "audit")
+    apps = _section(data, "apps")
 
     ls = models.get("llama_server", {})
     if not isinstance(ls, dict):
@@ -197,6 +221,18 @@ def _build_settings(data: dict, config_path: Path | None) -> Settings:
             output_dir=str(art.get("output_dir", "nova/artifacts/output")),
             max_file_mb=int(art.get("max_file_mb", 50)),
         ),
+        permissions=PermissionSettings(
+            auto_approve_read=bool(perm.get("auto_approve_read", True)),
+            interactive_approval=bool(perm.get("interactive_approval", True)),
+        ),
+        audit=AuditSettings(
+            file=str(aud.get("file", "logs/audit.jsonl")),
+        ),
+        apps=AppSettings(
+            enabled=list(apps.get("enabled", ["godot"])),
+            godot_bridge_port=int(apps.get("godot_bridge_port", 7456)),
+            godot_auto_launch=bool(apps.get("godot_auto_launch", False)),
+        ),
         config_path=config_path,
     )
 
@@ -245,6 +281,9 @@ def with_overrides(settings: Settings, **sections: dict) -> Settings:
         "personality": settings.personality,
         "models": settings.models,
         "artifacts": settings.artifacts,
+        "permissions": settings.permissions,
+        "audit": settings.audit,
+        "apps": settings.apps,
         "config_path": settings.config_path,
         "project_root": settings.project_root,
     }

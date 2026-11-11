@@ -11,7 +11,7 @@ Rule: a milestone is done only when tests pass, CLI works, and CHANGELOG.md is u
 - [x] Model interface (`ModelClient`), model router, honest stub backend
 - [x] Personality module skeleton (config-driven prompt assembly)
 - [x] Memory module skeleton (bounded short-term buffer)
-- [x] Tool registry skeleton (register/dispatch, no tools yet)
+- [x] Tool registry, allow-listed executor, and read-only filesystem listing
 - [x] **Artifact Engine skeleton** (engine + registry + workspace/templates/output, path safety, no format handlers)
 - [x] CLI: `chat` `routes` `artifacts` `config` `version`
 - [x] Test suite (stdlib unittest, 59 tests)
@@ -39,7 +39,7 @@ Rule: a milestone is done only when tests pass, CLI works, and CHANGELOG.md is u
 - [x] Tests: default suite 87/87 green (no server required); optional `integration_tests/` suite 5/5 against the real model (auto-skips when server is down)
 - [x] Docs updated (README/ARCHITECTURE/ROADMAP/CHANGELOG)
 - [ ] Streaming output in interactive `nova chat` (client supports it; CLI buffers full responses)
-- [ ] NOVA-side token/context budgeting (server fixed at `-c 4096` for now)
+- [x] NOVA-side character-budgeted conversation context (server remains fixed at `-c 4096`)
 - [ ] Mid-session server-death recovery (restart guidance only)
 
 ## M2 — Perception (vision + speech)
@@ -60,7 +60,8 @@ Rule: a milestone is done only when tests pass, CLI works, and CHANGELOG.md is u
 - [ ] Artifact result reporting in CLI
 
 ## M4 — Agentic planning (LLM decides, modules execute)
-- [ ] LLM tool-calling loop: model chooses tools, registry executes
+- [x] Initial real-model tool call path for the read-only filesystem listing tool (single round)
+- [ ] General multi-step LLM tool-calling loop and additional tools
 - [ ] LLM artifact planner: model decides WHAT to create/modify; engine executes
 - [ ] Template instantiation
 - [ ] General generated-file support (config dumps, scripts, etc.)

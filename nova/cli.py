@@ -17,12 +17,17 @@ explicitly enables it AND a manually started llama-server is reachable.
 from __future__ import annotations
 
 import argparse
+import itertools
+import random
 import sys
+import threading
+import time
 
 from nova import __version__
 from nova.artifacts import ArtifactEngine
 from nova.config import Settings, load_settings
 from nova.core import Orchestrator
+from nova.core.context_budget import ContextOverflowError
 from nova.logging_setup import get_logger, setup_logging
 from nova.memory import ShortTermMemory
 from nova.models import ModelRouter, TaskType
@@ -37,11 +42,144 @@ from nova.models import (
 )
 from nova.personality import PersonalityEngine
 from nova.tools import ToolRegistry
+from nova.tools.executor import EventBus, ToolExecutor
+from nova.tools.filesystem import register_filesystem_tools
+from nova.tools.desktop import register_desktop_tools
 
 MOCK_BANNER = (
     "!! MOCK MODEL BACKEND ACTIVE - NO REAL AI INFERENCE IS HAPPENING. !!\n"
     "!! Responses are canned placeholders (see nova/models/stub.py).    !!"
 )
+
+#: Status messages shown beside the spinner while a real model runs.
+STATUS_MESSAGES = [
+    "Thinking…",
+    "Putting the “pro” in procrastination",
+    "Thinking. Allegedly.",
+    "Overthinking, as usual",
+    "Confidently buffering",
+    "Brain cell loading",
+    "Stalling with style",
+    "One neuron working",
+    "Processing-ish",
+    "Expertly delaying progress",
+    "Almost having a thought",
+    "Pretending to compute",
+    "Delaying with purpose",
+    "Making this complicated",
+    "Vaguely doing math",
+    "Dramatic pause initiated",
+    "Loading questionable wisdom",
+    "Reasoning-adjacent activity",
+    "Precision-ish computing",
+    "Calculating… very slowly",
+    "Summoning fake urgency",
+    "Consulting the tiny oracle",
+    "Asking the hamster council",
+    "Herding the digital cats",
+    "Negotiating with the pixels",
+    "Counting the imaginary gears",
+    "Polishing a suspicious thought",
+    "Searching the idea drawer",
+    "Calibrating the sarcasm",
+    "Consulting the cosmic paperwork",
+    "Rebooting the thinking cap",
+    "Mapping world dominance",
+    "Bombaclating",
+    "Making this sound intentional",
+    "Rotating the problem",
+    "My brain’s buffering",
+]
+
+#: Braille spinner frames, cycled to animate the single status line.
+SPINNER_CHARS = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+
+#: Seconds the spinner waits between redraws while a request is in flight.
+SPINNER_TICK_S = 0.08
+#: Minimum/maximum seconds between status-message rotations.
+STATUS_MIN_S = 1.0
+STATUS_MAX_S = 2.0
+
+
+def _stdout_is_tty() -> bool:
+    """True only when stdout is a real terminal.
+
+    Guarded with ``hasattr`` so capture streams (e.g. ``io.StringIO`` used
+    in tests) that lack ``isatty`` never crash the CLI.
+    """
+    return hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
+
+
+def _select_status(previous: str | None) -> str:
+    """Pick a random status message, never the same as ``previous``.
+
+    Used by the thinking spinner so the status rotates without immediately
+    repeating the message currently on screen.
+    """
+    candidates = [message for message in STATUS_MESSAGES if message != previous]
+    return random.choice(candidates)
+
+
+class _ThinkingSpinner:
+    """Animated single-line status shown while a real model request runs.
+
+    The spinner lives on one terminal line (carriage return, no newline) and
+    rotates its status message every 1-2 seconds. It only draws on a real
+    TTY; stub backends and piped output stay quiet.
+    """
+
+    def __init__(self) -> None:
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._previous: str | None = None
+        self._last_message: str | None = None
+
+    def start(self) -> None:
+        """Begin animating on stdout. No-op when stdout is not a TTY."""
+        if not _stdout_is_tty():
+            return
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def _run(self) -> None:
+        spinner = itertools.cycle(SPINNER_CHARS)
+        next_switch = time.monotonic() + random.uniform(STATUS_MIN_S, STATUS_MAX_S)
+        while not self._stop.is_set():
+            now = time.monotonic()
+            if now >= next_switch:
+                self._last_message = _select_status(self._previous)
+                self._previous = self._last_message
+                next_switch = now + random.uniform(STATUS_MIN_S, STATUS_MAX_S)
+            if self._last_message is None:
+                # Wait for the first status selection before drawing.
+                self._stop.wait(SPINNER_TICK_S)
+                continue
+            char = next(spinner)
+            if _stdout_is_tty():
+                sys.stdout.write(f"\r\033[2K{char} {self._last_message}")
+                sys.stdout.flush()
+            self._stop.wait(SPINNER_TICK_S)
+
+    def stop(self, leave_final: bool = True) -> None:
+        """Stop the animation.
+
+        When ``leave_final`` is true and a status was drawn, the final status
+        is left visible on its own line (terminated with a newline) so the
+        response or error prints on the next line. Otherwise the line is
+        cleared.
+        """
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=2.0)
+            self._thread = None
+        if not _stdout_is_tty():
+            return
+        if leave_final and self._last_message is not None:
+            sys.stdout.write(f"\r\033[2K{self._last_message}\n")
+        else:
+            sys.stdout.write("\r\033[2K")
+        sys.stdout.flush()
 
 
 def build_orchestrator(settings: Settings) -> Orchestrator:
@@ -51,11 +189,14 @@ def build_orchestrator(settings: Settings) -> Orchestrator:
     personality = PersonalityEngine(settings.personality)
     artifacts = ArtifactEngine(settings.artifacts)
     artifacts.ensure_directories()
+    tool_registry = ToolRegistry()
+    register_filesystem_tools(tool_registry, settings.project_root)
+    register_desktop_tools(tool_registry)
     return Orchestrator(
         router=router,
         personality=personality,
         memory=memory,
-        tool_registry=ToolRegistry(),
+        tool_registry=tool_registry,
         artifacts=artifacts,
     )
 
@@ -97,9 +238,20 @@ def cmd_chat(args: argparse.Namespace, settings: Settings) -> int:
             continue
 
         result = None
+        spinner = None
         try:
+            if not isinstance(brain, StubModelClient):
+                spinner = _ThinkingSpinner()
+                spinner.start()
             result = orch.handle(user_input)
+        except ContextOverflowError as exc:
+            if spinner is not None:
+                spinner.stop(leave_final=True)
+            print(f"[context too large] {exc}\n")
+            continue
         except LlamaServerError as exc:
+            if spinner is not None:
+                spinner.stop(leave_final=True)
             # M1-B honesty rule: a failed real request is reported as a
             # failure. NOVA never silently swaps in the mock.
             print(f"[real backend unavailable] {exc}")
@@ -107,7 +259,14 @@ def cmd_chat(args: argparse.Namespace, settings: Settings) -> int:
                   "(see README 'Starting the brain') or set brain = \"stub\" "
                   "in config/nova.toml.\n")
             continue
+        if spinner is not None:
+            spinner.stop(leave_final=True)
         label = "nova(mock)" if result.is_mock else f"nova({result.model_id})"
+        for observation in result.metadata.get("tool_observations", []):
+            if observation.get("ok"):
+                print(f"[tool ran: {observation.get('tool')}]")
+            else:
+                print(f"[tool error: {observation.get('error')}]")
         print(f"{label}> {result.text}\n")
 
 
@@ -189,6 +348,30 @@ def cmd_version(args: argparse.Namespace, settings: Settings) -> int:
     return 0
 
 
+def cmd_files(args: argparse.Namespace, settings: Settings) -> int:
+    """Run the explicit filesystem tool loop (no model decision is implied)."""
+    registry = ToolRegistry()
+    root = args.root or settings.project_root
+    register_filesystem_tools(registry, root)
+    events = EventBus()
+    events.subscribe("tool.started", lambda event: get_logger("tools").info(
+        "tool started name=%s", event.data["tool"]))
+    executor = ToolExecutor(registry, events)
+    try:
+        result = executor.execute(
+            "filesystem.list_files", path=args.path,
+        )
+    except (OSError, ValueError) as exc:
+        print(f"filesystem tool failed: {exc}", file=sys.stderr)
+        return 1
+    print(f"Files under {result['root']}:")
+    for entry in result["entries"]:
+        print(f"- {entry['path']} ({entry['size']} bytes)")
+    if not result["entries"]:
+        print("(no visible files)")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="nova",
@@ -202,6 +385,9 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("artifacts", help="show Artifact Engine status")
     sub.add_parser("config", help="print effective configuration")
     sub.add_parser("version", help="print version")
+    files = sub.add_parser("files", help="list files through the read-only filesystem tool")
+    files.add_argument("path", nargs="?", default=".", help="directory relative to project root")
+    files.add_argument("--root", metavar="PATH", help="project root boundary (defaults to NOVA project)")
     model = sub.add_parser("model", help="model backend diagnostics")
     model_sub = model.add_subparsers(dest="model_command", required=True)
     status = model_sub.add_parser(
@@ -234,6 +420,7 @@ def main(argv: list[str] | None = None) -> int:
         "config": cmd_config,
         "model": cmd_model,
         "version": cmd_version,
+        "files": cmd_files,
     }
     return handlers[command](args, settings)
 

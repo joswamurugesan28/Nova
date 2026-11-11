@@ -50,3 +50,15 @@ workspace_dir = "nova/artifacts/workspace"
 templates_dir = "nova/artifacts/templates"
 output_dir = "nova/artifacts/output"
 max_file_mb = 50
+
+[permissions]
+auto_approve_read = true
+interactive_approval = true
+
+[audit]
+file = "logs/audit.jsonl"
+
+[apps]
+enabled = ["godot"]
+godot_bridge_port = 7456
+godot_auto_launch = false

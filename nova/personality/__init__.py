@@ -1,12 +1,18 @@
-"""Dynamic personality engine (M0 skeleton).
+"""Personality engine (M1-C upgrade).
 
-NOVA's persona is data-driven: name, style, and system prompt come from
-the ``[personality]`` section of the config. ``PersonalityEngine`` turns
-those values into the system prompt injected into every request.
+Provides the *base identity* as data-driven config, not a hard-coded
+Python string: name, style, and an explicit system prompt template the
+orchestrator composes into the conversation system message.
 
-Later milestones add persona profiles, per-session switching, and
-style adapters (e.g. formal/casual tone control). No AI behavior is
-implemented here - only prompt assembly, which is real and testable.
+Personality, at this stage, answers:
+
+* WHO NOVA is ("Neural Operations & Vision Assistant")
+* WHAT the system message says (technical, direct, can disagree with bad
+  ideas, can joke, can say "this is a bad idea", honest about limits,
+  never presents stub output as real AI)
+
+Future milestones add: per-session persona switching, dynamic prompt
+generation, style adapters, and tool-aware system prompts.
 """
 
 from __future__ import annotations
@@ -14,11 +20,17 @@ from __future__ import annotations
 from nova.config import PersonalitySettings
 
 
+class PersonalityMismatchError(ValueError):
+    """Raised when the configured personality is missing required fields."""
+
+
 class PersonalityEngine:
-    """Builds the system prompt used by the orchestrator."""
+    """Builds the system message for NOVA's conversation."""
 
     def __init__(self, settings: PersonalitySettings | None = None) -> None:
         self.settings = settings or PersonalitySettings()
+        if not self.settings.system_prompt.strip():
+            raise PersonalityMismatchError("system_prompt must not be empty")
 
     @property
     def name(self) -> str:
@@ -28,9 +40,11 @@ class PersonalityEngine:
     def style(self) -> str:
         return self.settings.style
 
-    def system_prompt(self) -> str:
-        """Return the full system prompt for the current persona."""
-        prompt = self.settings.system_prompt.strip()
+    def system_prompt(self, conversation_style: str = "") -> str:
+        """Return the base system message for the session."""
+        parts = [self.settings.system_prompt.strip()]
         if self.settings.style:
-            prompt = f"{prompt}\nStyle: {self.settings.style}."
-        return prompt
+            parts.append(f"Style: {self.settings.style}.")
+        if conversation_style:
+            parts.append(f"Conversation style: {conversation_style}.")
+        return "\n\n".join(p for p in parts if p.strip())

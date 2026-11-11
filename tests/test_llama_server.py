@@ -13,6 +13,7 @@ import socket
 import threading
 import time
 import unittest
+from unittest.mock import patch
 from contextlib import redirect_stdout
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -243,6 +244,34 @@ class LlamaServerClientTests(unittest.TestCase):
             {"role": "system", "content": "Be a pirate."},
             {"role": "user", "content": "x"},
         ])
+
+    def test_payload_accepts_tool_schemas_and_role_messages(self) -> None:
+        client = self.client("http://127.0.0.1:8080")
+        messages = [{"role": "user", "content": "list files"}]
+        tools = [{"type": "function", "function": {"name": "filesystem.list_files"}}]
+        payload = client._payload(
+            _request("list files", messages=messages, tools=tools), stream=False
+        )
+        self.assertEqual(payload["messages"], messages)
+        self.assertEqual(payload["tools"], tools)
+        self.assertEqual(payload["tool_choice"], "auto")
+
+    def test_completion_parses_native_tool_calls(self) -> None:
+        client = self.client("http://127.0.0.1:8080")
+        body = {
+            "model": "qwen-test",
+            "choices": [{"message": {
+                "role": "assistant", "content": None,
+                "tool_calls": [{"id": "call-1", "type": "function", "function": {
+                    "name": "filesystem.list_files", "arguments": {"path": "nova"},
+                }}],
+            }, "finish_reason": "tool_calls"}],
+        }
+        fake_response = io.BytesIO(json.dumps(body).encode("utf-8"))
+        with patch.object(client, "_open", return_value=fake_response):
+            response = client.generate(_request("list files", tools=[{"type": "function"}]))
+        self.assertEqual(response.metadata["tool_calls"][0]["function"]["arguments"],
+                         '{"path": "nova"}')
 
     def test_completion_timeout(self) -> None:
         url = self.start_server(mode="delay", delay=1.5)
